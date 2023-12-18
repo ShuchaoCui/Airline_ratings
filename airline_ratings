@@ -1,0 +1,438 @@
+---
+title: "Airline_Ratings_v2"
+format: revealjs
+editor: visual
+author: Shuchao Cui
+---
+
+{r setup, include=FALSE}
+# knitr::opts_chunk$set(echo = FALSE)
+renv::snapshot()
+install.packages(c("tidyverse","ggplot2","dplyr","GGally","gapminder","png","sf","maps","rnaturalearth"))
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(GGally)
+library(gapminder)
+library(png)
+library(GGally)
+library(sf)
+library(maps)
+library(rnaturalearth)
+
+# renv::restore()
+# renv::hydrate()
+
+{r}
+# options(error = NULL) 
+ratings <- read.csv("data/Airline_Reviews.csv")
+price <- read.csv("data/Flight_Price.csv")
+
+
+Glimpse of data
+
+{r}
+glimpse(ratings)
+glimpse(price)
+
+Discovery 1.1 Distribution of Time
+
+{r}
+# Distribution on time lines.
+ratings |>
+  separate(DateFlown," ",into=c("Month","Year")) |> 
+  ggplot() +
+  aes(y=Year) +
+  geom_bar() +
+  scale_x_continuous(labels=scales::label_number_si())
+
+Discovery 1.2 Distribution of CabinType
+
+{r}
+# Distribution on CaBinType.
+ratings |>
+  ggplot() +
+  aes(y=fct_infreq(CabinType)) +
+  geom_bar() +
+  scale_x_continuous(labels=scales::label_number_si())
+
+Discovery 1.3 Distribution of TravelType
+
+{r}
+# Distribution on Travel Type.
+ratings |>
+  ggplot() +
+  aes(y=fct_infreq(TravelType)) +
+  geom_bar() +
+  scale_x_continuous(labels=scales::label_number_si())
+
+
+Discovery 1.4 Distribution of Continents
+
+{r}
+# Distribution on continent. Discover in a fast way.
+left_join(ratings,distinct(select(gapminder,country,continent)),join_by(OriginCountry==country)) |>
+  ggplot() +
+  aes(y=fct_infreq(continent)) +
+  geom_bar() +
+  scale_x_continuous(labels=scales::label_number_si()) +
+  labs(title="Join Gapminder")
+
+
+Discovery 1.5 Distribution of countries
+
+with NA
+
+{r}
+# Look deeper in NA
+left_join(ratings,distinct(select(gapminder,country,continent)),join_by(OriginCountry==country)) |>
+  filter(is.na(continent)) |> 
+  ggplot() +
+  aes(y=fct_infreq(OriginCountry)) +
+  geom_bar() +
+  scale_x_continuous(labels=scales::label_number_si())
+
+Discovery 1.5 Distribution of countries
+
+in Europe
+
+{r}
+# Look deeper in Europe
+left_join(ratings,distinct(select(gapminder,country,continent)),join_by(OriginCountry==country)) |>
+  filter(continent=="Europe") |> 
+  ggplot() +
+  aes(y=fct_infreq(OriginCountry)) +
+  geom_bar() +
+  scale_x_continuous(labels=scales::label_number_si())
+
+Discovery 1.5 Distribution of countries
+
+of Asia
+
+{r}
+# Look deeper in Asia
+left_join(ratings,distinct(select(gapminder,country,continent)),join_by(OriginCountry==country)) |>
+  filter(continent=="Asia") |> 
+  ggplot() +
+  aes(y=fct_infreq(OriginCountry)) +
+  geom_bar() +
+  scale_x_continuous(labels=scales::label_number_si())
+
+Discovery 1.5 Distribution of countries
+
+of Americas
+
+{r}
+# Look deeper in Americas
+left_join(ratings,distinct(select(gapminder,country,continent)),join_by(OriginCountry==country)) |>
+  filter(continent=="Americas") |> 
+  ggplot() +
+  aes(y=fct_infreq(OriginCountry)) +
+  geom_bar() +
+  scale_x_continuous(labels=scales::label_number_si())
+
+
+Discovery 2.1 - Overall Score
+
+whole data set
+
+{r}
+# Vionlin on all years
+ratings |> 
+  separate(DateFlown,sep = " ",into = c("month","year")) |> 
+  ggplot() + 
+  aes(x="All Years",y=OverallScore) +
+  geom_violin()
+
+Discovery 2.1 - Overall Score
+
+Each year
+
+{r}
+# Violin on each year
+ratings |> 
+  separate(DateFlown,sep = " ",into = c("month","year")) |> 
+  ggplot() + 
+  aes(x=as.character(year),y=OverallScore) +
+  geom_violin()
+
+Discovery 2.1 - Overall Score
+
+after 2019
+
+{r}
+# Violin on the year>=2019
+ratings |> 
+  separate(DateFlown,sep = " ",into = c("month","year")) |> 
+  filter(year>=2019) |> 
+  ggplot() + 
+  aes(x="year>=2019",y=OverallScore) +
+  geom_violin()
+
+Discovery 2.2 - Scores distribution
+
+after 2019
+
+{r}
+# Violin on the year>=2019
+ratings |> 
+  separate(DateFlown,sep = " ",into = c("month","year")) |> 
+  filter(year>=2019) |> 
+  ggplot() + 
+  aes(x=OverallScore) +
+  geom_bar() 
+
+Discovery 2.2 - Score distribution
+
+Recommended vs not Recommended
+
+{r}
+# piechart on all years
+ratings |> 
+  separate(DateFlown,sep = " ",into = c("month","year")) |> 
+  filter(year>=2019) |> 
+  ggplot() + 
+  geom_bar(aes(y=OverallScore)) +
+  geom_text(aes(y=OverallScore,label=..count..),stat='count',hjust=0) +
+  facet_wrap(~ Recommended) +
+  coord_cartesian(xlim =c(0,30000)) +
+  ggtitle("OverScore on Recommanded Group")
+
+Discovery 2.3 - ggpairs of ratings
+
+{r}
+
+# ratings_longer <-
+#   ratings |>
+#   pivot_longer(cols = contains("Rating"),
+#                names_to = "Type",
+#                values_to = "Rating",
+#                names_pattern = "(.*)Rating") |>
+#   relocate("unique_id","Type","Rating")
+# ratings_recommended <- filter(ratings,Recommended=="yes")
+# ratings_not_recommended <- filter(ratings,Recommended=="no")
+# #
+# GGally::ggpairs(dplyr::select(ratings_recommended,(contains("Rating") | contains("Score"))))
+# GGally::ggpairs(dplyr::select(ratings_not_recommended,(contains("Rating") | contains("Score"))))
+
+# 找更好的方式。0-5的分数，找更好的分析方法。
+
+Analysis 3.1: Relations of Recommended_rate and Rating_score
+
+by country
+
+{r}
+# European countries
+european_countries <- 
+  # filter(gapminder,continent=="Europe") |> select(country) |> distinct()
+c("Albania","Andorra","Armenia","Austria","Azerbaijan","Belarus","Belgium","Bosnia and Herzegovina","Bulgaria","Croatia","Cyprus","Czech Republic","Denmark","Estonia","Finland","France","Georgia","Germany","Greece","Hungary","Iceland","Ireland","Italy","Kosovo","Latvia","Liechtenstein","Lithuania","Luxembourg","Malta","Moldova","Monaco","Montenegro","Netherlands","North Macedonia","Norway","Poland","Portugal","Romania","Russia","San Marino","Serbia","Slovakia","Slovenia","Spain","Sweden","Switzerland","Turkey","Ukraine","UnitedKingdom", "VaticanCity")
+
+# filter European flight, Economy Class
+ratings_euro <- ratings  |>
+  separate(DateFlown,sep = " ",into = c("month","year")) |> 
+  # mutate(Recommended_rate=sum(Recommended=="yes")/n()) |> 
+  filter(OriginCountry %in% european_countries,
+         year>=2019,
+         CabinType=='Economy Class') |> 
+  relocate("unique_id","AirlineName","Aircraft","CabinType","year","month",
+           "TravelType","Route",
+           "Recommended","OverallScore",
+           contains("rating"))
+# glimpse(ratings_euro)
+
+{r}
+ratings_euro |>
+  group_by(OriginCountry) |>
+  summarise(rec_rate=sum(Recommended=="yes")/n(),
+         avg_score=mean(OverallScore)) |>
+  ggplot() +
+  geom_point(aes(x=rec_rate,y=avg_score),color="darkblue") +
+  labs(title="Relations of Recommended_rate and Rating_score",
+       subtitle = "By Country") +
+  theme(panel.grid.major.y = element_blank(),
+  panel.grid.major.x = element_line(size = 0.5),
+  plot.caption = element_text(face = "italic"),
+  strip.text = element_text(face = "bold"),
+  plot.caption.position = "plot") +
+  scale_x_continuous(labels = scales::percent)
+
+Analysis 3.1: Relations of Recommended_rate and Rating_score
+
+by airline
+
+{r}
+ratings_euro |>
+  group_by(AirlineName) |>
+  summarise(rec_rate=sum(Recommended=="yes")/n(),
+         avg_score=mean(OverallScore)) |>
+  ggplot() +
+  geom_point(aes(x=rec_rate,y=avg_score),color="darkblue") +
+  labs(title="Relations of Recommended_rate and Rating_score",
+       subtitle = "By Airline") +
+  scale_x_continuous(labels = scales::percent)
+
+
+Analysis 3.2: Distribution of Airlines
+
+{r}
+# Distribution on Airlines.
+# need modify
+ratings_euro |>
+  group_by(AirlineName) |>
+  summarise(n=n()) |>
+  mutate(sum=sum(n),
+         p=n/sum) |> 
+  mutate(Airline=fct_lump_n(factor(AirlineName),w=n,n=20)) |> 
+  ggplot() +
+  aes(y=reorder(Airline,n),x=n) +
+  geom_bar(stat="identity") +
+  geom_text(aes(label=sprintf("%.2f%%", p * 100)),hjust=-1,size=1.5) +
+  coord_cartesian(xlim =c(0,2500)) +
+  theme(axis.text.y = element_text(size = 8))
+
+Analysis 3.2: pick top 20 to analyze
+
+{r}
+ratings_euro |>
+  group_by(AirlineName) |>
+  summarise(n=n()) |>
+  mutate(sum=sum(n),
+         p=n/sum) |> 
+  mutate(Airline=fct_lump_n(factor(AirlineName),w=n,n=20)) |> 
+  filter(Airline!="Other") |> summarise(percentage_top20=sum(p))
+
+n_top20 <- ratings_euro |>
+  group_by(AirlineName) |>
+  summarise(n=n()) |>
+  mutate(sum=sum(n),
+         p=n/sum) |> 
+  mutate(Airline=fct_lump_n(factor(AirlineName),w=n,n=20)) |> 
+  filter(Airline!="Other") |> 
+  select(Airline) |> 
+  distinct()
+n_top20
+
+{r}
+# Distribution on Airlines.
+ratings_euro_airlines <- ratings_euro |> 
+  filter(AirlineName %in% n_top20$Airline) |> 
+  group_by(AirlineName) |>
+  mutate(OverallRating=OverallScore/2) |> 
+  summarise(across(contains("Rating"),
+                   list(mean))) |> 
+  rename_with(~gsub("_1", "", .), everything()) |> 
+  relocate("AirlineName","OverallRating") |> 
+  pivot_longer(contains("Score")|contains("Rating"),
+               names_to = "type",
+               values_to = "rating") 
+
+ratings_euro_airlines$type <- str_replace(ratings_euro_airlines$type, "Rating", "")
+
+ratings_euro_airlines
+
+Analysis 4.1: Generally, the best choices
+
+{r}
+ratings_euro_airlines |> 
+  ggplot() +
+  aes(x = type, y = reorder(AirlineName,rating), fill = rating) +
+  geom_tile() +
+  scale_fill_viridis_c() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+
+Analysis 4.2: ratings in each country
+
+Data preparation
+
+{r}
+# Distribution on Airlines&Countries.
+ratings_euro_airlines_countries <- ratings_euro |> 
+  filter(AirlineName %in% n_top20$Airline) |> 
+  group_by(AirlineName,OriginCountry) |>
+  mutate(OverallRating=OverallScore/2) |> 
+  summarise(across(contains("Rating"),
+                   list(mean))) |> 
+  rename_with(~gsub("_1", "", .), everything()) |> 
+  relocate("AirlineName","OverallRating") |> 
+  pivot_longer(contains("Score")|contains("Rating"),
+               names_to = "type",
+               values_to = "rating") 
+
+ratings_euro_airlines_countries$type <- str_replace(ratings_euro_airlines_countries$type, "Rating", "")
+
+ratings_euro_airlines_countries
+
+Analysis 4.2: ratings in each country
+
+{r}
+ratings_euro_airlines_countries |> 
+  filter(OriginCountry %in% c("France","Germany","UnitedKingdom","Italy")) |> 
+  ggplot() +
+  aes(x = type, y = reorder(AirlineName,rating), fill = rating) +
+  geom_tile(size=5) +
+  facet_wrap(~OriginCountry) +
+  scale_fill_viridis_c() +
+  theme(axis.text.x=element_text(angle=20,hjust=1,size=6),
+        axis.text.y=element_text(size=6))
+
+
+Analysis 4.2: ratings in each country
+
+France: Volotea, Qatar Airways .
+
+Germany: Qatar Airways, Air France
+
+Italy: Volotea, Qatar Airways, KLM Royal Dutch
+
+UK: Aegean Airlines, Qatar Airways
+
+Analysis 4.3: One glance at Luxembourg
+
+{r}
+ratings_euro_airlines_countries |> 
+  filter(OriginCountry %in% c("Luxembourg")) |> 
+  ggplot() +
+  aes(x = type, y = reorder(AirlineName,rating), fill = rating) +
+  geom_tile(size=5) +
+  facet_wrap(~OriginCountry) +
+  scale_fill_viridis_c() +
+  theme(axis.text.x=element_text(angle=20,hjust=1,size=6),
+        axis.text.y=element_text(size=6))
+
+
+Analysis 5.1: Price distribution of class type
+
+{r}
+price |> 
+  ggplot() +
+  geom_violin(aes(x=class,y=price))
+
+Analysis 5.2: Price distribution of departure time
+
+{r}
+price |> filter(class=="Economy") |> 
+  ggplot() +
+  geom_violin(aes(x=departure_time,y=price))
+
+Analysis 5.3: warning! wrong data set
+
+price_airlines
+
+{r}
+# glimpse(price)
+price_airlines <- price |> 
+  filter(class=="Economy") |> 
+  group_by(airline) |> 
+  mutate(avg_price=mean(price)) 
+
+{r}
+# price |> 
+#   filter(str_detect(airline,"Ryanair"))
+
+price |> select(airline) |> distinct()
+
+Next Step:
+
+find new data set of flight price.
+
+analyze the ratings on time series.(trend)
