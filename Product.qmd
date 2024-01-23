@@ -1,0 +1,427 @@
+---
+title: "Analysis of Airline Ratings in Europe"
+format: revealjs
+editor: visual
+author: Shuchao Cui
+---
+
+```{r setup, include=FALSE}
+# knitr::opts_chunk$set(echo = FALSE)
+# knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+# renv::snapshot()
+install.packages(c("tidyverse","ggplot2","dplyr","png","gridExtra","plotly","yaml"))
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(plotly)
+library(yaml)
+
+renv::restore()
+# renv::hydrate()
+```
+
+```{r}
+# options(error = NULL) 
+ratings_raw <- read.csv("data/Airline_Reviews.csv")
+#price <- read.csv("data/Flight_Price.csv")
+
+```
+
+```{r}
+theme_set(theme_bw(base_size = 12))
+```
+
+```{r}
+ratings <- ratings_raw |> 
+  separate(DatePub," ",into=c("Date","Month","Year")) |> 
+  rename("CabinServiceRating" = "ServiceRating",
+         "ValueforMoneyRating" = "ValueRating") |> 
+  na.omit()
+
+# European countries
+european_countries <- 
+c("Albania","Andorra","Armenia","Austria","Azerbaijan","Belarus","Belgium","Bosnia and Herzegovina","Bulgaria","Croatia","Cyprus","Czech Republic","Denmark","Estonia","Finland","France","Georgia","Germany","Greece","Hungary","Iceland","Ireland","Italy","Kosovo","Latvia","Liechtenstein","Lithuania","Luxembourg","Malta","Moldova","Monaco","Montenegro","Netherlands","North Macedonia","Norway","Poland","Portugal","Romania","Russia","San Marino","Serbia","Slovakia","Slovenia","Spain","Sweden","Switzerland","Turkey","Ukraine","UnitedKingdom", "VaticanCity")
+
+# filter European flight, Economy Class, in the past ten years
+ratings_euro <- ratings  |>
+  filter(OriginCountry %in% european_countries,
+         Year>=2013,
+         CabinType=='Economy Class') |> 
+  relocate("unique_id","AirlineName","Aircraft","CabinType","Year","Month","Date",
+           "TravelType","Route",
+           "Recommended","OverallScore",
+           contains("Rating"))
+```
+
+```{r}
+#Apply labels to the data indicating opposing responses between OverallScore and the recommended decision.
+ratings_euro_dataclean <- ratings_euro |> 
+  mutate(data_clean=(case_when(
+    (OverallScore > 5 & Recommended == "no") ~ 0,
+    (OverallScore < 5 & Recommended == "yes") ~ 0,
+    TRUE ~ 1
+  )))
+
+# 2.59% of the whole data are "invalid questionnaires"
+
+# throw invalid data
+ratings_euro_fixed <- filter(ratings_euro_dataclean,data_clean==1)
+```
+
+## Dataset Overview:
+
+**Source:** Kaggle dataset from <https://www.airlinequality.com/>
+
+**Data Preparation:**
+
+-   **Exclusion:** Elimination of Invalid Questionnaires (2.8%)
+
+-   **Filter:** Europe Departure; Economy Class; Last Decade
+
+-   **Data Structure:** Tibble with 22 columns \* 28k rows
+
+**Focus Areas:**
+
+-   Selecting the Optimal Airline (recent 3 yrs analysis)
+
+-   Analysis of Review Trends (over the last 10 yrs)
+
+## 1.1 Preprocessing
+
+```{r}
+
+# plot1
+plot1 <- ratings_euro |>
+  group_by(AirlineName) |>
+  summarise(recommend_rate = sum(Recommended == "yes") / n(),
+            avg_overallscore = mean(OverallScore)) |>
+  na.omit() |>
+  ggplot() +
+  geom_line(aes(x = recommend_rate/((avg_overallscore+1)*10/11)*10), # norm "1-10"
+            color = "darkblue",stat="density") +
+  geom_vline(aes(xintercept = mean(recommend_rate/((avg_overallscore+1)*10/11)*10)), 
+             color = "red", linetype = "dashed", size = 1) +  
+  geom_vline(aes(xintercept = median(recommend_rate/((avg_overallscore+1)*10/11)*10)), 
+             color = "blue", linetype = "dashed", size = 1) +  
+  labs(title = "Recommend/Rating by airline") +
+  theme(axis.text.y = element_blank()) +
+  scale_x_continuous(labels = scales::percent) +
+  labs(x="",y="")
+
+# plot2
+data <- ratings_euro_fixed |>
+  mutate(OverallRating = OverallScore/2, na.rm = TRUE) |>
+  select(contains("Rating")) |>
+  rename_with(~ gsub("Rating", "", .), contains("Rating"))
+data <- na.omit(data)
+
+cor_matrix <- cor(data, method = "spearman")
+
+cor_df <- as.data.frame(cor_matrix)
+cor_df$variable <- rownames(cor_df)
+cor_df_long <- tidyr::gather(cor_df, key = "variable2", value = "correlation", -variable)
+
+cor_df_long_sorted <- cor_df_long[order(cor_df_long$correlation, decreasing = TRUE), ]
+
+plot2 <- ggplot(cor_df_long_sorted, aes(x = variable, y = variable2, fill = correlation)) +
+  geom_tile() +
+  scale_fill_gradient(low = "lightblue", high = "darkblue") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank()) +
+    #     axis.text.y = element_blank()) +
+  labs(title = "Rating Collinearity",x="",y="",fill="") +
+  scale_y_discrete(labels = c("CabinService" = "CabinSv",
+                              "GroundService" = "GroundSv",
+                              "ValueforMoney" = "Value$",
+                              "SeatComfort" = "Seat",
+                              "Entertainment" = "Enterntn")) +
+  scale_x_discrete(labels = c("CabinService" = "CabinSv",
+                              "GroundService" = "GroundSv",
+                              "ValueforMoney" = "Value$"))
+
+# plot3
+plot3 <- ratings_euro_fixed |>
+  group_by(AirlineName) |>
+  summarise(n = n()) |>
+  mutate(sum = sum(n),
+         p = n / sum) |> 
+  mutate(Airline = fct_lump_n(factor(AirlineName), w = n, n = 20)) |> 
+  ggplot() +
+  aes(y = reorder(Airline, n), x = n) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = ifelse(Airline == "Other", "", sprintf("%.2f%%", p * 100)), hjust = -0.5)) +
+  labs(y = "", x = "") +
+  # geom_text(aes(label = paste("Sum of these top 20: ", percentage_top20 * 100, "%")),x = 1, y = 2, vjust = -13, hjust = -1) +
+  theme(axis.text.x = element_blank()) +
+  labs(title="20 airlines contribute 50% of the total")
+
+# plot4
+plot4 <- ratings_euro_fixed |>
+  group_by(OriginCountry) |>
+  summarise(n = n()) |>
+  mutate(sum = sum(n),
+         p = n / sum) |> 
+  mutate(OriginCountry = fct_lump_n(factor(OriginCountry), w = n, n = 10)) |> 
+  ggplot() +
+  aes(y = reorder(OriginCountry, n), x = n) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = ifelse(OriginCountry == "Other", "", sprintf("%.2f%%", p * 100)), hjust = 0.5)) +
+  labs(y = "", x = "") +
+  geom_text(aes(label = paste("Sum of these top 10: ", percentage_top10_c * 100, "%")),x = 1, y = 2, vjust = -13, hjust = -1) +
+  theme(axis.text.x = element_blank())
+
+# Plot layout
+layout_matrix <- matrix(c(1, 1, 3, 3, 2, 2, 3, 3), ncol = 4, byrow = TRUE)
+heights <- c(1, 1)
+combined_plot <- arrangeGrob(plot1, plot2, plot3,layout_matrix = layout_matrix, heights = heights)
+
+grid.arrange(combined_plot)
+
+```
+
+## 1.2 Service S&W across Airlines
+
+```{r}
+# Distribution on Airlines&Countries.
+n_top20 <- ratings_euro_fixed |>
+  filter(Year>=2021) |> 
+  group_by(AirlineName) |>
+  summarise(n=n()) |>
+  arrange(desc(n)) |> 
+  slice(1:20)
+
+
+ratings_euro_airlines_countries <- ratings_euro_fixed |> 
+  # filter(AirlineName %in% n_top20$AirlineName,Year>=2021) |> 
+  filter(Year>=2021) |> 
+  mutate(OverallRating=OverallScore/2) |> 
+  group_by(AirlineName,OriginCountry) |>
+  summarise(across(contains("Rating"),
+                   list(mean)),.groups = "drop") |>
+  rename_with(~gsub("_1", "", .), everything()) |> 
+  relocate("AirlineName","OverallRating") |> 
+  pivot_longer(contains("Rating"),
+               names_to = "Service_Type",
+               values_to = "Rating",
+               names_pattern = "(.*)Rating")
+
+# top20 serving amount airlines in each country
+top20_by_country <- ratings_euro_fixed |> 
+  filter(Year >= 2021) |> 
+  group_by(OriginCountry, AirlineName) |> 
+  summarise(total_services = n(), .groups = "drop") |> 
+  arrange(OriginCountry, desc(total_services),AirlineName) |> 
+  group_by(OriginCountry)  |> 
+  slice_head(n = 20)
+
+# Heatmap
+ratings_euro_airlines_countries |> 
+  right_join(top20_by_country,
+             by=c("OriginCountry","AirlineName")) |> 
+  filter(!is.na(Service_Type)) |> 
+  filter(OriginCountry %in% c("UnitedKingdom","Germany","Netherlands","France")) |>
+  ggplot() +
+  aes(x = Service_Type, y = reorder(AirlineName,Rating), fill = Rating) +
+  geom_tile(size=5) +
+  facet_wrap(~OriginCountry,scales = "free_y") +
+  scale_fill_viridis_c(limits = c(0, 5),breaks = seq(0, 5, 1)) +
+  theme(axis.text.x=element_text(angle=20,hjust=1,size=6),
+        axis.text.y=element_text(size=6)) +
+  labs(y="",x="")
+
+```
+
+## 1.3 Service S&W across Airlines
+
+```{r}
+# Heatmap
+ratings_euro_airlines_countries |> 
+  filter(OriginCountry %in% c("Italy","Switzerland","Spain","Luxembourg")) |>
+  right_join(top20_by_country,
+             by=c("OriginCountry","AirlineName")) |> 
+  filter(!is.na(Service_Type)) |> 
+  ggplot() +
+  aes(x = Service_Type, y = reorder(AirlineName,Rating), fill = Rating) +
+  geom_tile(size=5) +
+  facet_wrap(~OriginCountry,scales = "free_y") +
+  scale_fill_viridis_c(limits = c(0, 5),breaks = seq(0, 5, 1)) +
+  theme(axis.text.x=element_text(angle=20,hjust=1,size=6),
+        axis.text.y=element_text(size=6)) +
+  labs(y="",x="")
+```
+
+## 2.1 Flight Quality Trend
+
+```{r}
+# Vionlin on all years
+# plot_rating_entire
+plot_re <- ratings_euro_fixed |> 
+  ggplot() + 
+  aes(x=">=2013",y=OverallScore,fill = "Year >= 2013") +
+  geom_violin(alpha=0.5,scale="width") +
+  theme(legend.position = "none",
+        axis.text.x = element_blank()) +
+  labs(x="",y="") +
+  scale_fill_brewer(palette = "Greens")
+
+# plot_rating_trend
+plot_rt <- ratings_euro_fixed |> 
+  ggplot() + 
+  aes(x=Year, y=OverallScore, fill=Year) +
+  geom_violin(alpha=0.5, scale="width") +
+  theme(legend.position="none",
+        axis.text.x = element_blank()) +
+  labs(x="",y="") +
+  scale_fill_brewer(palette="Greens") +
+  labs(x="")
+
+# plot_service_type
+fixed_Rating <- ratings_euro_fixed |> 
+  filter(Year>=2013) |> 
+  mutate(OverallRating=OverallScore/2,na.rm=TRUE) |> 
+  pivot_longer(cols = contains("Rating"),
+               names_to = "service_type",
+               values_to = "Rating",
+               names_pattern = "(.*)Rating") |>
+  group_by(Year,service_type) |> 
+  summarise(avg_Rating=mean(Rating,na.rm=TRUE),.groups="drop") |> 
+  na.omit()
+
+plot_st <- fixed_Rating |> 
+  ggplot() +
+  aes(x=Year,y=avg_Rating,color=service_type) +
+  geom_line(aes(group=service_type)) +
+  geom_point(size=2)
+
+# plot_travel_type
+fixed_TravelType <- ratings_euro_fixed |> 
+  filter(Year>=2013) |> 
+  mutate(OverallRating=OverallScore/2,na.rm=TRUE) |> 
+  group_by(Year,TravelType) |> 
+  summarise(avg_Rating=mean(OverallRating,na.rm=TRUE),.groups="drop") |> 
+  na.omit()
+  
+plot_tt <- fixed_TravelType |> 
+  filter(TravelType!="") |> 
+  ggplot() +
+  aes(x=Year,y=avg_Rating,color=TravelType) +
+  geom_line(aes(group=TravelType)) +
+  geom_point(size=2)+
+  theme(axis.text.y = element_blank()) +
+  labs(x="",y="")
+
+# Plot layout
+layout_matrix_2 <- matrix(c(1,2,3,3), ncol = 2, byrow = TRUE)
+heights_2 <- c(1, 1)
+combined_plot <- arrangeGrob(plot_re, plot_rt, plot_tt, layout_matrix = layout_matrix_2, heights = heights_2)
+
+grid.arrange(combined_plot)
+```
+
+## 2.2 Country-wise Trend
+
+```{r}
+# top 7 country
+Country_top10 <- ratings_euro_fixed |>
+  filter(Year>=2013) |> 
+  group_by(OriginCountry) |>
+  summarise(n=n()) |>
+  arrange(desc(n)) |> 
+  slice(1:7)
+
+# ratings over country & year
+ratings_euro_countries_year <- ratings_euro_fixed |> 
+  filter(OriginCountry %in% Country_top10$OriginCountry |
+           OriginCountry =="Luxembourg") |> 
+  mutate(OverallRating=OverallScore/2) |> 
+  group_by(OriginCountry,Year) |>
+  summarise(across(contains("Rating"),
+                   list(mean)),.groups = "drop") |>
+  rename_with(~gsub("_1", "", .), everything()) |> 
+  relocate("OriginCountry","OverallRating") |> 
+  pivot_longer(contains("Rating"),
+               names_to = "Service_Type",
+               values_to = "Rating",
+               names_pattern = "(.*)Rating") |> 
+  filter(Rating!=0)
+
+# plot
+p_country <- ratings_euro_countries_year |> 
+  filter(Service_Type!="Overall") |> 
+  ggplot() +
+  aes(x=OriginCountry,
+      y=reorder(Service_Type,Rating),
+      frame=Year,
+      size=Rating,
+      color=Rating) +
+  geom_point() +
+  theme(legend.position = "none")+
+  labs(x="",y="") +
+  scale_x_discrete(labels = c("UnitedKingdom" = "UK",
+                              "France"="FR",
+                              "Germany"="GE",
+                              "Luxembourg"="LU",
+                              "Netherlands"="NE",
+                              "Switzerland"="CH",
+                              "Greece"="GR")) +
+  scale_size(range = c(0.5, 12))
+
+ggplotly(p_country) |> 
+  animation_opts(frame = 1500,redraw = T) |> 
+  animation_slider(
+  currentvalue = list(prefix = "Year: ", font = list(size = 10))
+)
+```
+
+## 2.3 Airline-wise trend
+
+```{r}
+# top 8 airline
+Airline_top10 <- ratings_euro_fixed |>
+  filter(Year>=2013) |> 
+  group_by(AirlineName) |>
+  summarise(n=n()) |>
+  arrange(desc(n)) |> 
+  slice(1:8)
+
+# ratings over airline & year
+ratings_euro_airline_year <- ratings_euro_fixed |> 
+  filter(AirlineName %in% Airline_top10$AirlineName) |> 
+  mutate(OverallRating=OverallScore/2) |> 
+  group_by(AirlineName,Year) |>
+  summarise(across(contains("Rating"),
+                   list(mean)),.groups = "drop") |>
+  rename_with(~gsub("_1", "", .), everything()) |> 
+  relocate("AirlineName","OverallRating") |> 
+  pivot_longer(contains("Rating"),
+               names_to = "Service_Type",
+               values_to = "Rating",
+               names_pattern = "(.*)Rating") |> 
+  filter(Rating!=0)
+
+# plot
+p_Airline <- ratings_euro_airline_year |> 
+  filter(Service_Type!="Overall") |> 
+  ggplot() +
+  aes(x=AirlineName,
+      y=reorder(Service_Type,Rating),
+      frame=Year,
+      size=Rating,
+      color=Rating) +
+  geom_point() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45,size=7))+
+  labs(x="",y="") +
+  scale_x_discrete(labels = c("KLM Royal Dutch Airlines" = "KLM Royal Dutch")) +
+  scale_size(range = c(0.5, 12))
+
+ggplotly(p_Airline) |>
+  animation_opts(frame = 1500) |> 
+  animation_slider(
+  currentvalue = list(prefix = "Year: ", font = list(size = 10))
+)
+```
+
+# Thank you for your kind attention!
